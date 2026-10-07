@@ -97,20 +97,34 @@ export const leader = (r: Round): Trade | null => r.buys[r.buys.length - 1] ?? n
 
 export type BuyResult =
   | { kind: "ignored" } // too small, a sell, or already counted
-  | { kind: "counted"; round: Round }
+  /** `evicted`: buys that counted until now but no longer fit (see applyTrade); they belong to the next round. */
+  | { kind: "counted"; round: Round; evicted: Trade[] }
   /** The buy came after the bomb went off: the round is over and this buy lights the next one. */
   | { kind: "afterDeadline" };
 
-/** Applies one trade to the round. Late-arriving buys that happened before the deadline still count. */
+/**
+ * Applies one trade to the round. Late-arriving buys that happened before the deadline still count.
+ * A late buy in the middle of a round only adds time. But one from before the round's first buy starts the clock
+ * earlier, which can end the round before buys that counted until now: those come back as `evicted`. (Found in
+ * the 2026-10-07 local demo, D17.)
+ */
 export function applyTrade(r: Round, t: Trade, rules: GameRules): BuyResult {
   if (!qualifies(t, rules)) return { kind: "ignored" };
   if (r.buys.some((b) => b.sig === t.sig && b.wallet === t.wallet && b.lamports === t.lamports)) return { kind: "ignored" };
-  // Only the buys before this one decide whether the bomb was still lit when it landed. Adding time never
-  // shortens the clock, so a late-arriving earlier buy can't knock out a later one that already counted.
   const buys = orderTrades([...r.buys, t]);
-  const d = deadlineOf(buys.slice(0, buys.indexOf(t)), rules);
-  if (d !== null && t.ts > d) return { kind: "afterDeadline" };
-  return { kind: "counted", round: { status: "live", buys } };
+  let d: number | null = null;
+  let cut = buys.length;
+  for (let i = 0; i < buys.length; i++) {
+    const b = buys[i]!;
+    if (d !== null && b.ts > d) {
+      cut = i;
+      break;
+    }
+    d = d === null ? b.ts + rules.startSeconds : Math.min(d + rules.addSeconds, b.ts + rules.maxSeconds);
+  }
+  const kept = buys.slice(0, cut);
+  if (!kept.includes(t)) return { kind: "afterDeadline" };
+  return { kind: "counted", round: { status: "live", buys: kept }, evicted: buys.slice(cut) };
 }
 
 /**

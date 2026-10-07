@@ -177,6 +177,33 @@ describe("Fomo3D timer (D17)", () => {
     expect(applyTrade(r2, buy(2900), fomo).kind).toBe("counted");
   });
 
+  it("an earlier first buy that turns up late moves the start, and evicts buys that no longer fit", () => {
+    const fast = { ...DEFAULT_RULES, startSeconds: 30, addSeconds: 3, maxSeconds: 30 };
+    let r = emptyRound();
+    const later = buy(1100);
+    const res1 = applyTrade(r, later, fast);
+    if (res1.kind !== "counted") throw new Error("should count");
+    r = res1.round;
+    expect(deadline(r, fast)).toBe(1130);
+    // A buy at 1000 shows up late: the bomb really started at 1000 and went off at 1030, before 1100.
+    const res2 = applyTrade(r, buy(1000), fast);
+    expect(res2.kind).toBe("counted");
+    if (res2.kind !== "counted") return;
+    expect(res2.round.buys.map((b) => b.ts)).toEqual([1000]);
+    expect(res2.evicted).toEqual([later]);
+    expect(deadline(res2.round, fast)).toBe(1030);
+  });
+
+  it("a late buy in the middle never evicts anything", () => {
+    let r = emptyRound();
+    for (const t of [buy(1000), buy(2700)]) {
+      const res = applyTrade(r, t, fomo);
+      if (res.kind === "counted") r = res.round;
+    }
+    const res = applyTrade(r, buy(2000), fomo);
+    expect(res.kind === "counted" && res.evicted).toEqual([]);
+  });
+
   it("start = add = max is the old reset bomb", () => {
     expect(deadline(play([buy(1000), buy(1300)]), rules)).toBe(1900);
   });

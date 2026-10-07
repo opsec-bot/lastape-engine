@@ -57,6 +57,7 @@ export async function verifyRound(opts: { site: string; round: number; rpcUrl: s
 
   // 2. The memo.
   if (!receiptSig) fail("no memo transaction yet");
+  else if (receiptSig.startsWith("sim-")) lines.push("--   demo round: its memo was simulated, nothing on-chain to compare");
   else {
     const tx = await getTx(rpc, receiptSig);
     const want = receiptMemo(receipt);
