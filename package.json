@@ -1,0 +1,27 @@
+{
+  "name": "lastape-engine",
+  "version": "1.0.0",
+  "description": "The rules behind $BOMB (Last Ape Wins): the bomb timer, the pot split, round receipts and a checker anyone can run.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "verify-round": "src/cli.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "verify-round": "tsx src/cli.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "bs58": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.2"
+  }
+}
