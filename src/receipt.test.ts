@@ -32,6 +32,10 @@ function receipt(): Receipt {
     v: 1, game: "BOMB", mint: "MINT", pool: "POOL", round: 1, rules: { minBuyLamports: String(SOL / 10n), startSeconds: 1800, addSeconds: 120, maxSeconds: 1800 },
     split: DEFAULT_SPLIT_BPS, teamWallets: [], available: String(10n * SOL), buys, balances, referrals, winner: bob.address,
     shares: res.shares.map((s) => ({ ...s, lamports: s.lamports.toString() })), rollover: res.rollover.toString(),
+    airdrop: {
+      poolBefore: "0", added: res.airdropIn.toString(), poolAfter: res.airdropPool.toString(), chanceBps: 1000,
+      slot: null, blockhash: null, tickets: 0, roll: null, hit: false, winner: null,
+    },
   };
 }
 

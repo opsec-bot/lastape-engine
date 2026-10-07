@@ -22,7 +22,7 @@ function buyLogs(user: string, sol: bigint, tokens: bigint, ts: number) {
   return [`Program ${PUMP_PROGRAM_ID} invoke [1]`, `Program data: ${data.toString("base64")}`, `Program ${PUMP_PROGRAM_ID} success`];
 }
 
-function world(o: { hideBuy?: boolean; badMemo?: boolean } = {}) {
+function world(o: { hideBuy?: boolean; badMemo?: boolean; ipfs?: "same" | "tampered"; badBlock?: boolean } = {}) {
   const alice = key(), bob = key(), carol = key();
   // On chain: alice and bob play round 1; carol buys after it's over (next round).
   const chain = [
@@ -43,15 +43,23 @@ function world(o: { hideBuy?: boolean; badMemo?: boolean } = {}) {
     rules: { minBuyLamports: String(SOL / 10n), startSeconds: 1800, addSeconds: 120, maxSeconds: 1800 },
     split: DEFAULT_SPLIT_BPS, teamWallets: [], available: String(4n * SOL), buys, balances, referrals: [], winner,
     shares: res.shares.map((s) => ({ ...s, lamports: s.lamports.toString() })), rollover: res.rollover.toString(),
+    airdrop: {
+      poolBefore: "0", added: res.airdropIn.toString(), poolAfter: res.airdropPool.toString(), chanceBps: 1000,
+      slot: 9999, blockhash: "DRAWHASH", tickets: 0, roll: null, hit: false, winner: null,
+    },
   };
   const memo = o.badMemo ? "BOMB r1 receipt sha256:00" : receiptMemo(receipt);
   const fetchImpl = (async (url: string, init?: { body: string }) => {
-    if (url.includes("/api/rounds/1/receipt")) return Response.json({ receipt, receiptSig: "MEMO" });
+    if (url.includes("/api/rounds/1/receipt")) return Response.json({ receipt, receiptSig: "MEMO", receiptCid: o.ipfs ? "bafyCID" : null });
+    if (url.endsWith("/ipfs/bafyCID")) return Response.json(o.ipfs === "tampered" ? { ...receipt, winner: "someone" } : JSON.parse(JSON.stringify(receipt)));
     const { method, params } = JSON.parse(init!.body) as { method: string; params: [string, { before?: string }] };
     if (method === "getSignaturesForAddress") {
       if (params[1].before) return Response.json({ result: [] });
       return Response.json({ result: [...chain].reverse().map((c) => ({ signature: c.sig, blockTime: c.ts, err: null })) });
     }
+    if (method === "getBlock") return Response.json({ result: { blockhash: o.badBlock ? "OTHERHASH" : "DRAWHASH", blockTime: 2921 } });
+    if (method === "getBlocks") return Response.json({ result: [params[0] as unknown as number] });
+    if (method === "getBlockTime") return Response.json({ result: 2920 }); // the bomb went off at 2920
     if (params[0] === "MEMO") return Response.json({ result: { slot: 40, blockTime: 9999, meta: { err: null, logMessages: [`Program log: Memo (len 9): "${memo}"`] } } });
     const c = chain.find((x) => x.sig === params[0])!;
     return Response.json({ result: { slot: c.slot, blockTime: c.ts, meta: { err: null, logMessages: buyLogs(c.user, c.sol, 100n, c.ts) } } });
@@ -70,6 +78,19 @@ describe("verifyRound", () => {
     const r = await verifyRound({ site: "https://x", round: 1, rpcUrl: "https://rpc", fetchImpl: world({ hideBuy: true }).fetchImpl });
     expect(r.ok).toBe(false);
     expect(r.lines.some((l) => l.startsWith("FAIL on-chain buy missing from the receipt: s2"))).toBe(true);
+  });
+
+  it("compares the IPFS copy with the site's receipt", async () => {
+    const same = await verifyRound({ site: "https://x", round: 1, rpcUrl: "https://rpc", fetchImpl: world({ ipfs: "same" }).fetchImpl });
+    expect(same.ok).toBe(true);
+    expect(same.lines).toContain("ok   IPFS copy bafyCID is the same receipt");
+    const bad = await verifyRound({ site: "https://x", round: 1, rpcUrl: "https://rpc", fetchImpl: world({ ipfs: "tampered" }).fetchImpl });
+    expect(bad.lines).toContain("FAIL IPFS copy bafyCID differs from the site's receipt");
+  });
+
+  it("catches an airdrop drawn from a block with a different hash", async () => {
+    const r = await verifyRound({ site: "https://x", round: 1, rpcUrl: "https://rpc", fetchImpl: world({ badBlock: true }).fetchImpl });
+    expect(r.lines).toContain("FAIL airdrop: block 9999 has a different hash than the receipt says");
   });
 
   it("catches a memo that doesn't match", async () => {

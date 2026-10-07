@@ -1,6 +1,6 @@
 # lastape-engine
 
-The rules behind **$BOMB** ([lastape.fly.dev](https://lastape.fly.dev)), in the open. This is the exact code the game
+The rules behind **$BOMB** ([lastape.fun](https://lastape.fun)), in the open. This is the exact code the game
 runs to decide every round: the bomb timer, the winner, the pot split, the round receipts, and a checker anyone can
 run against the chain.
 
@@ -17,9 +17,16 @@ pot can hand out:
 | 50% | The winner |
 | 25% | Everyone who made a qualifying buy that round and still holds, by SOL bought |
 | 10% | The referrers of that round's buyers, by their buyers' SOL |
-| 15% | Rolls into the next round, plus every share nobody qualified for |
+| 13% | Rolls into the next round, plus every share nobody qualified for |
+| 2% | The airdrop pot |
 
 Winners are paid right away. Dividends and referrals are paid once a wallet is owed 0.1 SOL.
+
+## The airdrop
+2% of every round builds a side pot. When a round ends there's a 10% chance it drops: one qualifying buy from that
+round wins the whole airdrop pot (every buy is a ticket, and the buyer must still hold). The draw is
+`sha256("BOMB airdrop|r<round>|<blockhash>")`, using the first Solana block after the bomb went off, so nobody can
+know it while buying. See `drawAirdrop` in `src/split.ts`.
 
 ## What's in here
 | File | What it does |
@@ -35,15 +42,18 @@ Winners are paid right away. Dividends and referrals are paid once a wallet is o
 npm install
 npm run verify-round -- 12
 ```
-That checks round 12 on lastape.fly.dev with the free PublicNode RPC. Pass a site and an RPC URL to use others:
-`npm run verify-round -- 12 https://lastape.fly.dev https://your-rpc`.
+That checks round 12 on lastape.fun with the free PublicNode RPC. Pass a site and an RPC URL to use others:
+`npm run verify-round -- 12 https://lastape.fun https://your-rpc`.
 
-It checks three things:
+It checks:
 1. **The rules.** The receipt's buys all qualify and landed before the bomb went off, the winner is the last buyer
-   still holding, every referral is signed by the buyer's own wallet, and the split recomputes to the lamport.
-2. **The memo.** The receipt's SHA-256 is in a memo transaction on Solana, written when the round closed, so the
-   receipt can't be changed later.
-3. **The chain.** The receipt's buys are exactly the coin's qualifying buys on-chain during the round. None
+   still holding, every referral is signed by the buyer's own wallet, the airdrop draw recomputes, and the split
+   recomputes to the lamport.
+2. **The IPFS copy.** Every receipt is pinned to IPFS; the copy must be the same receipt as the site's.
+3. **The memo.** The receipt's SHA-256 (and IPFS CID) is in a memo transaction on Solana, written when the round
+   closed, so the receipt can't be changed later.
+4. **The airdrop block.** The block the draw used really has that hash and is the first block after the bomb.
+5. **The chain.** The receipt's buys are exactly the coin's qualifying buys on-chain during the round. None
    added, none left out.
 
 One thing it can't replay: token balances at the moment the round closed. The receipt records them, and the memo
@@ -60,7 +70,8 @@ Issued: <unix ms>
 ```
 
 The site asks your wallet to sign it once. The first one counts and never changes, and it only counts for buys
-made after it.
+made after it. Wallets can also claim a short name (`lastape.fun/?ref=sam`) the same way; the name only points at
+the address.
 
 ## Tests
 ```

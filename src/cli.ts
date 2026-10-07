@@ -2,7 +2,7 @@
 // Checks a round with public data only: npx tsx src/cli.ts <round> [site] [rpc]
 import { verifyRound } from "./checker.js";
 
-const [roundArg, site = "https://lastape.fly.dev", rpcUrl = "https://solana-rpc.publicnode.com"] = process.argv.slice(2);
+const [roundArg, site = "https://lastape.fun", rpcUrl = "https://solana-rpc.publicnode.com"] = process.argv.slice(2);
 const round = Number(roundArg);
 if (!Number.isInteger(round) || round < 1) {
   console.error("usage: verify-round <round> [site] [rpc]");

@@ -28,8 +28,22 @@ export type Receipt = {
   /** Every referral binding used, with the signed message so anyone can check it. */
   referrals: ReceiptReferral[];
   winner: string | null;
-  shares: { wallet: string; kind: "win" | "div" | "ref"; lamports: string }[];
+  shares: { wallet: string; kind: "win" | "div" | "ref" | "drop"; lamports: string }[];
   rollover: string;
+  /** The airdrop side pot (D19): what was in it, what this round added, the block that drew it and the result. */
+  airdrop: {
+    poolBefore: string;
+    added: string;
+    poolAfter: string;
+    chanceBps: number;
+    /** The first block after the bomb went off. */
+    slot: number | null;
+    blockhash: string | null;
+    tickets: number;
+    roll: number | null;
+    hit: boolean;
+    winner: string | null;
+  };
 };
 
 /** Stable JSON: object keys sorted, so the same receipt always hashes the same. */
@@ -42,7 +56,8 @@ export function canonicalJson(v: unknown): string {
 }
 
 export const receiptHash = (r: Receipt) => createHash("sha256").update(canonicalJson(r)).digest("hex");
-export const receiptMemo = (r: Receipt) => `BOMB r${r.round} receipt sha256:${receiptHash(r)}`;
+/** The memo written on-chain for a round. With a CID, anyone can fetch the receipt from IPFS even if the site is gone. */
+export const receiptMemo = (r: Receipt, cid?: string | null) => `BOMB r${r.round} receipt sha256:${receiptHash(r)}${cid ? ` ipfs:${cid}` : ""}`;
 
 /** The exact text a wallet signs to bind a referrer. The site and server build the same string. */
 export const referralMessage = (wallet: string, referrer: string, issuedAt: number) =>
@@ -116,7 +131,14 @@ export function checkReceipt(r: Receipt): string[] {
       return ref && ref.boundAt <= ts ? ref.referrer : null;
     },
     bps: r.split,
+    airdrop: { round: r.round, pool: BigInt(r.airdrop.poolBefore), chanceBps: r.airdrop.chanceBps, blockhash: r.airdrop.blockhash },
   });
+  const a = r.airdrop;
+  if (res.airdropIn.toString() !== a.added) problems.push(`airdrop: added should be ${res.airdropIn}, receipt says ${a.added}`);
+  if (res.airdropPool.toString() !== a.poolAfter) problems.push(`airdrop: pot after should be ${res.airdropPool}, receipt says ${a.poolAfter}`);
+  if ((res.draw?.winner ?? null) !== a.winner || (res.draw?.hit ?? false) !== a.hit) {
+    problems.push(`airdrop: draw should be ${res.draw?.hit ? `a hit for ${res.draw.winner ?? "nobody"}` : "a miss"}, receipt says ${a.hit ? `a hit for ${a.winner ?? "nobody"}` : "a miss"}`);
+  }
   const key = (s: { wallet: string; kind: string; lamports: bigint | string }) => `${s.kind}:${s.wallet}:${s.lamports}`;
   const want = new Set(res.shares.map(key));
   const got = new Set(r.shares.map(key));

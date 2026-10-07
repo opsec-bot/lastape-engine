@@ -3,7 +3,10 @@
 
 import { decodeLogs } from "./pump/events.js";
 import { qualifies, tradesFrom, type Trade } from "./game.js";
-import { checkReceipt, receiptDeadline, receiptMemo, type Receipt } from "./receipt.js";
+import { checkReceipt, receiptDeadline, receiptHash, receiptMemo, type Receipt } from "./receipt.js";
+
+/** Public gateway for receipts pinned to IPFS. Any gateway works; the hash check doesn't trust it. */
+export const IPFS_GATEWAY = "https://gateway.pinata.cloud/ipfs/";
 
 type Rpc = (method: string, params: unknown[]) => Promise<unknown>;
 
@@ -46,7 +49,7 @@ export async function verifyRound(opts: { site: string; round: number; rpcUrl: s
 
   const res = await f(`${opts.site.replace(/\/$/, "")}/api/rounds/${opts.round}/receipt`);
   if (!res.ok) return { ok: false, lines: [`FAIL couldn't get the receipt (${res.status})`] };
-  const { receipt, receiptSig } = (await res.json()) as { receipt: Receipt; receiptSig: string | null };
+  const { receipt, receiptSig, receiptCid } = (await res.json()) as { receipt: Receipt; receiptSig: string | null; receiptCid?: string | null };
 
   // 1. Rules.
   const problems = checkReceipt(receipt);
@@ -54,6 +57,14 @@ export async function verifyRound(opts: { site: string; round: number; rpcUrl: s
   else pass(`rules: ${receipt.buys.length} buys, winner ${receipt.winner ?? "nobody"}, ${receipt.shares.length} shares, split recomputes exactly`);
 
   const rpc = jsonRpc(opts.rpcUrl, f);
+
+  // 2a. The IPFS copy: the same receipt, independent of the site.
+  if (receiptCid) {
+    const copy = await f(`${IPFS_GATEWAY}${receiptCid}`).then((r) => (r.ok ? (r.json() as Promise<Receipt>) : null)).catch(() => null);
+    if (!copy) lines.push(`--   couldn't reach the IPFS copy (${receiptCid}) right now`);
+    else if (receiptHash(copy) === receiptHash(receipt)) pass(`IPFS copy ${receiptCid} is the same receipt`);
+    else fail(`IPFS copy ${receiptCid} differs from the site's receipt`);
+  } else lines.push("--   no IPFS copy for this round");
 
   // 2. The memo.
   if (!receiptSig) fail("no memo transaction yet");
@@ -64,6 +75,19 @@ export async function verifyRound(opts: { site: string; round: number; rpcUrl: s
     if (tx?.meta?.logMessages?.some((l) => l.includes(want))) pass(`memo ${receiptSig} carries this receipt's hash`);
     else fail(`memo ${receiptSig} doesn't carry "${want}"`);
   }
+
+  // 2b. The airdrop draw's block: really on-chain, really the first block after the bomb went off.
+  const boom = receiptDeadline(receipt);
+  const a = receipt.airdrop;
+  if (a?.slot !== null && a?.slot !== undefined && a.blockhash && boom !== null) {
+    const block = (await rpc("getBlock", [a.slot, { commitment: "finalized", transactionDetails: "none", rewards: false, maxSupportedTransactionVersion: 0 }])) as { blockhash: string; blockTime: number | null } | null;
+    const before = (await rpc("getBlocks", [Math.max(0, a.slot - 500), a.slot - 1, { commitment: "finalized" }])) as number[];
+    const prevTime = before.length ? ((await rpc("getBlockTime", [before.at(-1)])) as number | null) : null;
+    if (!block || block.blockhash !== a.blockhash) fail(`airdrop: block ${a.slot} has a different hash than the receipt says`);
+    else if (block.blockTime === null || block.blockTime <= boom) fail(`airdrop: block ${a.slot} isn't after the bomb went off`);
+    else if (prevTime === null || prevTime > boom) fail(`airdrop: block ${a.slot} isn't the first block after the bomb went off`);
+    else pass(`airdrop: drawn from block ${a.slot}, the first block after the bomb went off (${a.hit ? `hit, won by ${a.winner ?? "nobody"}` : "missed"})`);
+  } else lines.push("--   no airdrop draw recorded for this round");
 
   // 3. The buys, against the chain.
   const end = receiptDeadline(receipt);
